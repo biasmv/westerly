@@ -199,7 +199,7 @@ def apply_replacements(contents: str, replacements: List[Replacement]) -> str:
     return contents
 
 
-def from_east_to_west_const(fn: str) -> str:
+def convert_west_to_east_const(fn: str) -> str:
     cpp_source = pathlib.Path(fn).read_text()
     tokens = as_cpp_tokens(cpp_source)
     west_const_token_indices = get_west_const_indices(tokens)
@@ -234,7 +234,7 @@ def from_east_to_west_const(fn: str) -> str:
 @click.option("--in-place/--stdout", "-i", default=False)
 def main(input_files: List[click.Path], in_place: bool) -> None:
     for input_file in input_files:
-        output = from_east_to_west_const(str(input_file))
+        output = convert_west_to_east_const(str(input_file))
         if in_place:
             with open(str(input_file), "w") as f:
                 f.write(output)
