@@ -13,8 +13,10 @@ Limitations:
 
 
 import click
-import pygments.lexers
-from pygments.token import Comment, Name, Keyword, Text, _TokenType
+import pathlib
+import pygments.lexers  # type: ignore
+from pygments.token import Comment, Name, Keyword, Text  # type: ignore
+from pygments.token import _TokenType
 from typing import NamedTuple, Tuple, List
 
 
@@ -38,12 +40,7 @@ class Replacement(NamedTuple):
     new_text: str
 
 
-def read_file_contents(fn):
-    with open(fn, "r") as f:
-        return f.read()
-
-
-def is_const(token):
+def is_const(token: Token) -> bool:
     return token[2] == "const"
 
 
@@ -58,7 +55,7 @@ LEFT_SCV_QUALIFIERS = 1
 SOMETHING_ELSE = 2
 
 
-def new_state_for_token(token, state):
+def new_state_for_token(token: Token, state: int) -> int:
     spelling = token[2]
     expression_starting_tokens = (
         ";",
@@ -83,19 +80,20 @@ def new_state_for_token(token, state):
     return SOMETHING_ELSE
 
 
-def is_space(token):
+def is_space(token: Token) -> bool:
     return token[2].isspace()
 
 
-def is_comment(token):
+def is_comment(token: Token) -> bool:
     return token[1] in (Comment.Single, Comment.Multiline)
 
 
-def skip_over_preproc_definition(tokens, index):
+def skip_over_preproc_definition(tokens: List[Token], index: int) -> int:
     while index < len(tokens):
         if tokens[index][2] == "\n":
             return index + 1
         index += 1
+    return -1
 
 
 def get_west_const_indices(tokens: List[Token]) -> List[int]:
@@ -135,7 +133,12 @@ def as_cpp_tokens(string: str) -> List[Token]:
     return list(cpp_lexer.get_tokens_unprocessed(string))
 
 
-def skip_over_template_args(tokens, index):
+def skip_over_template_args(tokens: List[Token], index: int) -> int:
+    """
+    Assuming that index points to an opening '<', returns the position of the
+    first token after the matching closing '>'. Returns -1 in case no matching
+    '>' is found.
+    """
     num_open = 1
     index += 1
     while index < len(tokens):
@@ -149,7 +152,7 @@ def skip_over_template_args(tokens, index):
     return -1
 
 
-def find_east_const_pos(tokens, index):
+def find_east_const_pos(tokens: List[Token], index: int) -> int:
     start = index
     index += 1
     name_is_type = True
@@ -181,54 +184,59 @@ def find_east_const_pos(tokens, index):
     return -1
 
 
-def apply_replacements(contents: str, edits: List[Replacement]) -> str:
+def apply_replacements(contents: str, replacements: List[Replacement]) -> str:
     """
     Applies a set of (non-overlapping) replacements to a text and returns 
     it.
     """
-    edits = sorted(edits)
+    replacements = sorted(replacements)
     shift = 0
-    for edit in edits:
-        start = edit.src_range.start + shift
-        end = start + edit.src_range.length
-        shift += len(edit.new_text) - edit.src_range.length
-        contents = contents[:start] + edit.new_text + contents[end:]
+    for replacement in replacements:
+        start = replacement.src_range.start + shift
+        end = start + replacement.src_range.length
+        shift += len(replacement.new_text) - replacement.src_range.length
+        contents = contents[:start] + replacement.new_text + contents[end:]
     return contents
 
 
-def from_east_to_west_const(fn):
-    contents = read_file_contents(fn)
-    tokens = as_cpp_tokens(contents)
-    indices = get_west_const_indices(tokens)
+def from_east_to_west_const(fn: str) -> str:
+    cpp_source = pathlib.Path(fn).read_text()
+    tokens = as_cpp_tokens(cpp_source)
+    west_const_token_indices = get_west_const_indices(tokens)
     # Lists of replacements
-    edits = []
-    for index in indices:
-        new_pos = find_east_const_pos(tokens, index)
+    replacements = []
+    for west_const_token_index in west_const_token_indices:
+        new_pos = find_east_const_pos(tokens, west_const_token_index)
         if new_pos < 0:
             continue
-        has_space_after_const = is_space(tokens[index + 1])
-        old_len = len(tokens[index][2]) + int(has_space_after_const) * len(
-            tokens[index + 1][2]
-        )
-        edits.append(Replacement(Range(tokens[index][0], old_len), ""))
+        west_const_token = tokens[west_const_token_index]
+        next_token = tokens[west_const_token_index + 1]
+
+        old_len = len(west_const_token[2])
+        has_space_after_const = is_space(next_token)
+        old_len += int(has_space_after_const) * len(next_token[2])
+        # Express each const movement as to separate replacement: a cut on the
+        # left side to remove the const from its original location and a paste
+        # on the right side.
+        replacements.append(Replacement(Range(west_const_token[0], old_len), ""))
         new = ""
         if not tokens[new_pos - 1][2].isspace():
             new += " "
         new += "const"
         if not is_space(tokens[new_pos]):
             new += " "
-        edits.append(Replacement(Range(tokens[new_pos][0], 0), new))
-    return apply_replacements(contents, edits)
+        replacements.append(Replacement(Range(tokens[new_pos][0], 0), new))
+    return apply_replacements(cpp_source, replacements)
 
 
 @click.command()
 @click.argument("input-files", nargs=-1, type=click.Path(exists=True))
 @click.option("--in-place/--stdout", "-i", default=False)
-def main(input_files, in_place):
+def main(input_files: List[click.Path], in_place: bool) -> None:
     for input_file in input_files:
-        output = from_east_to_west_const(input_file)
+        output = from_east_to_west_const(str(input_file))
         if in_place:
-            with open(input_file, "w") as f:
+            with open(str(input_file), "w") as f:
                 f.write(output)
         else:
             print(output)
