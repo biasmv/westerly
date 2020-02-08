@@ -2,34 +2,33 @@
 
 import os
 import sys
-import glob
 import subprocess
 import difflib
-
-pjoin = os.path.join
+import pathlib
+import pytest  # type: ignore
 
 
 def expected_output_file_name(input_name):
     return "{}.out.cc".format(input_name[: input_name.index(".in.cc")])
 
 
-def read_file_contents(fn):
-    with open(fn, "r") as f:
-        return f.read().split("\n")
+THIS_DIR = pathlib.Path(__file__).parent
+
+ALL_TEST_CASES = sorted((THIS_DIR / "test").glob("*.in.cc"))
 
 
-def verify_west_to_const_conv(test_case):
-    exe_name = pjoin(os.path.dirname(__file__), "bin", "westerly")
-    print("verifying '{}'".format(test_case))
-    output_file_name = expected_output_file_name(test_case)
+@pytest.mark.parametrize("test_case", ALL_TEST_CASES)
+def test_west_to_east_const_conv(test_case):
+    exe_name = THIS_DIR / "bin" / "westerly"
+    output_file_name = expected_output_file_name(str(test_case))
     command_output = subprocess.run(
         [exe_name, "--stdout", test_case], stdout=subprocess.PIPE
     )
-    expected_output = read_file_contents(output_file_name)
+    expected_output = pathlib.Path(output_file_name).read_text().split("\n")
     actual_output = command_output.stdout.decode().split("\n")
 
     if expected_output == actual_output:
-        return True
+        return
 
     the_diff = difflib.unified_diff(
         actual_output,
@@ -40,13 +39,4 @@ def verify_west_to_const_conv(test_case):
     )
     for line in the_diff:
         print(line)
-    return False
-
-
-def test_all():
-    test_dir_path = pjoin(os.path.dirname(__file__), "test")
-    num_failed = 0
-    for test_case in sorted(glob.glob(pjoin(test_dir_path, "*.in.cc"))):
-        if not verify_west_to_const_conv(test_case):
-            num_failed += 1
-    assert num_failed == 0
+    assert False
