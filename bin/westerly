@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""
+Utility to convert source files using east-const placement to west-const.
+
+
+Limitations:
+
+- does not change const placement in macro definitions
+- does not change const placement after macros
+- does not change const placement after __attribute__((foo))
+
+"""
+
+
+import click
+import pygments.lexers
+from pygments.token import Comment, Name, Keyword, Text, _TokenType
+from typing import NamedTuple, Tuple, List
+
+
+class Range(NamedTuple):
+    start: int
+    length: int
+
+
+# A token, as returned by the pygments lexer.
+Token = Tuple[int, _TokenType, str]
+
+
+class Replacement(NamedTuple):
+    """
+    A replacement operation to be applied to text. The replacement will replace 
+    the text in src_range with the text specified in new_text. When new_text is 
+    empty, the text in src_range will effectively be cut.
+    """
+
+    src_range: Range
+    new_text: str
+
+
+def read_file_contents(fn):
+    with open(fn, "r") as f:
+        return f.read()
+
+
+def is_const(token):
+    return token[2] == "const"
+
+
+# last token initiated a new expression
+EXPRESSION_START = 0
+# currently processing as sequence of static, constexpr, volatile
+# qualifiers to the left of a type. Const appearing at this position
+# are west consts.
+LEFT_SCV_QUALIFIERS = 1
+# currently processing something other than an expression start or
+# SCV qualifier sequence. Waiting for the next expression start.
+SOMETHING_ELSE = 2
+
+
+def new_state_for_token(token, state):
+    spelling = token[2]
+    expression_starting_tokens = (
+        ";",
+        ",",
+        "(",
+        "{",
+        "<",
+        "-",
+        "+",
+        "==",
+        "<=",
+        ">=",
+        "!=",
+        "=",
+        "}",
+        "typedef",
+    )
+    if spelling in expression_starting_tokens:
+        return EXPRESSION_START
+    if spelling in ("constexpr", "volatile", "static") and state < SOMETHING_ELSE:
+        return LEFT_SCV_QUALIFIERS
+    return SOMETHING_ELSE
+
+
+def is_space(token):
+    return token[2].isspace()
+
+
+def is_comment(token):
+    return token[1] in (Comment.Single, Comment.Multiline)
+
+
+def skip_over_preproc_definition(tokens, index):
+    while index < len(tokens):
+        if tokens[index][2] == "\n":
+            return index + 1
+        index += 1
+
+
+def get_west_const_indices(tokens: List[Token]) -> List[int]:
+    """
+    Returns a list of indices of west-const locations in the token stream. 
+    East-const as well as const used in other contexts (such as const used to 
+    mark a method as const) are ignored.
+
+    Since we do not have a full understanding of the C++ syntax, there are a 
+    couple of situations in which we can't decided whether a certain const is 
+    a west const (see list of limitations above).
+    """
+    state = EXPRESSION_START
+    west_const_indices = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if is_const(token) and state < SOMETHING_ELSE:
+            west_const_indices.append(index)
+            state = LEFT_SCV_QUALIFIERS
+            index += 1
+            continue
+        if is_space(token) or is_comment(token):
+            index += 1
+            continue
+        if token[1] == Comment.Preproc and token[2] == "#":
+            index = skip_over_preproc_definition(tokens, index)
+            state = LEFT_SCV_QUALIFIERS
+            continue
+        state = new_state_for_token(token, state)
+        index += 1
+    return west_const_indices
+
+
+def as_cpp_tokens(string: str) -> List[Token]:
+    cpp_lexer = pygments.lexers.get_lexer_by_name("c++")
+    return list(cpp_lexer.get_tokens_unprocessed(string))
+
+
+def skip_over_template_args(tokens, index):
+    num_open = 1
+    index += 1
+    while index < len(tokens):
+        if tokens[index][2] == "<":
+            num_open += 1
+        if tokens[index][2] == ">":
+            num_open -= 1
+        if num_open == 0:
+            return index + 1
+        index += 1
+    return -1
+
+
+def find_east_const_pos(tokens, index):
+    start = index
+    index += 1
+    name_is_type = True
+    while index < len(tokens):
+        token = tokens[index]
+        if is_space(token) or (name_is_type and is_comment(token)):
+            index += 1
+            continue
+        if token[2] in ("static", "constexpr", "volatile"):
+            index += 1
+            continue
+        if token[1] == Keyword.Type:
+            return index + 1
+        if token[1] == Name:
+            if not name_is_type:
+                return index
+            name_is_type = False
+            index += 1
+            continue
+        if token[2] == "<":
+            return skip_over_template_args(tokens, index)
+        if token[2] == ":" and index + 1 < len(tokens) and tokens[index + 1][2] == ":":
+            index += 2
+            name_is_type = True
+            continue
+        if index == start + 1 and token[2] in ("}", ")", "]"):
+            return -1
+        return index
+    return -1
+
+
+def apply_replacements(contents: str, edits: List[Replacement]) -> str:
+    """
+    Applies a set of (non-overlapping) replacements to a text and returns 
+    it.
+    """
+    edits = sorted(edits)
+    shift = 0
+    for edit in edits:
+        start = edit.src_range.start + shift
+        end = start + edit.src_range.length
+        shift += len(edit.new_text) - edit.src_range.length
+        contents = contents[:start] + edit.new_text + contents[end:]
+    return contents
+
+
+def from_east_to_west_const(fn):
+    contents = read_file_contents(fn)
+    tokens = as_cpp_tokens(contents)
+    indices = get_west_const_indices(tokens)
+    # Lists of replacements
+    edits = []
+    for index in indices:
+        new_pos = find_east_const_pos(tokens, index)
+        if new_pos < 0:
+            continue
+        has_space_after_const = is_space(tokens[index + 1])
+        old_len = len(tokens[index][2]) + int(has_space_after_const) * len(
+            tokens[index + 1][2]
+        )
+        edits.append(Replacement(Range(tokens[index][0], old_len), ""))
+        new = ""
+        if not tokens[new_pos - 1][2].isspace():
+            new += " "
+        new += "const"
+        if not is_space(tokens[new_pos]):
+            new += " "
+        edits.append(Replacement(Range(tokens[new_pos][0], 0), new))
+    return apply_replacements(contents, edits)
+
+
+@click.command()
+@click.argument("input-files", nargs=-1, type=click.Path(exists=True))
+@click.option("--in-place/--stdout", "-i", default=False)
+def main(input_files, in_place):
+    for input_file in input_files:
+        output = from_east_to_west_const(input_file)
+        if in_place:
+            with open(input_file, "w") as f:
+                f.write(output)
+        else:
+            print(output)
+
+
+if __name__ == "__main__":
+    main()
