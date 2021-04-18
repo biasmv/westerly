@@ -11,7 +11,7 @@ Limitations:
 
 """
 
-
+import sys
 import click
 import pathlib
 import pygments.lexers  # type: ignore
@@ -199,6 +199,13 @@ def apply_replacements(contents: str, replacements: List[Replacement]) -> str:
     return contents
 
 
+def file_contains_west_consts(fn: str) -> bool:
+    cpp_source = pathlib.Path(fn).read_text()
+    tokens = as_cpp_tokens(cpp_source)
+    west_const_token_indices = get_west_const_indices(tokens)
+    return len(west_const_token_indices) > 0
+
+
 def convert_west_to_east_const(fn: str) -> str:
     cpp_source = pathlib.Path(fn).read_text()
     tokens = as_cpp_tokens(cpp_source)
@@ -229,10 +236,29 @@ def convert_west_to_east_const(fn: str) -> str:
     return apply_replacements(cpp_source, replacements)
 
 
+def all_files_are_westconst_free(input_files: List[click.Path]) -> bool:
+    west_const_free = True
+    for input_file in input_files:
+        if file_contains_west_consts(str(input_file)):
+            print('"{}" contains one or more west consts'.format(input_file))
+            west_const_free = False
+    return west_const_free
+
+
 @click.command()
 @click.argument("input-files", nargs=-1, type=click.Path(exists=True))
 @click.option("--in-place/--stdout", "-i", default=False)
-def main(input_files: List[click.Path], in_place: bool) -> None:
+@click.option(
+    "--check-only",
+    default=False,
+    is_flag=True,
+    help="check whether any of the input files contain west consts. Return code 0 means there are no west consts, return code 1 means some files contain west consts.",
+)
+def main(input_files: List[click.Path], in_place: bool, check_only: bool) -> None:
+    at_least_one_file_contains_west_consts = False
+    if check_only:
+        sys.exit(0 if all_files_are_westconst_free(input_files) else 1)
+
     for input_file in input_files:
         output = convert_west_to_east_const(str(input_file))
         if in_place:

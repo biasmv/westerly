@@ -40,3 +40,21 @@ def test_west_to_east_const_conv(test_case):
     for line in the_diff:
         print(line)
     assert False
+
+
+def test_check_only_sets_return_code_to_zero_when_no_westconsts_are_present():
+    exe_name = THIS_DIR / "bin" / "westerly"
+    subprocess.check_call(
+        [exe_name, "--check-only", str(THIS_DIR / "test" / "002.out.cc")],
+        stdout=subprocess.PIPE,
+    )
+
+
+def test_check_only_sets_return_code_to_one_when_westconsts_are_present():
+    exe_name = THIS_DIR / "bin" / "westerly"
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        subprocess.check_call(
+            [exe_name, "--check-only", str(THIS_DIR / "test" / "002.in.cc")],
+            stdout=subprocess.PIPE,
+        )
+    assert e.value.returncode == 1

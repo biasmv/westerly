@@ -6,7 +6,7 @@ README = (HERE / "README.md").read_text()
 
 setup(
     name="westerly",
-    version="0.1.1",
+    version="0.2.1",
     description="Turns west-const C/C++ source files into east-const",
     long_description=README,
     long_description_content_type="text/markdown",
