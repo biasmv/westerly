@@ -31,8 +31,8 @@ Token = Tuple[int, _TokenType, str]
 
 class Replacement(NamedTuple):
     """
-    A replacement operation to be applied to text. The replacement will replace 
-    the text in src_range with the text specified in new_text. When new_text is 
+    A replacement operation to be applied to text. The replacement will replace
+    the text in src_range with the text specified in new_text. When new_text is
     empty, the text in src_range will effectively be cut.
     """
 
@@ -98,12 +98,12 @@ def skip_over_preproc_definition(tokens: List[Token], index: int) -> int:
 
 def get_west_const_indices(tokens: List[Token]) -> List[int]:
     """
-    Returns a list of indices of west-const locations in the token stream. 
-    East-const as well as const used in other contexts (such as const used to 
+    Returns a list of indices of west-const locations in the token stream.
+    East-const as well as const used in other contexts (such as const used to
     mark a method as const) are ignored.
 
-    Since we do not have a full understanding of the C++ syntax, there are a 
-    couple of situations in which we can't decided whether a certain const is 
+    Since we do not have a full understanding of the C++ syntax, there are a
+    couple of situations in which we can't decided whether a certain const is
     a west const (see list of limitations above).
     """
     state = EXPRESSION_START
@@ -186,7 +186,7 @@ def find_east_const_pos(tokens: List[Token], index: int) -> int:
 
 def apply_replacements(contents: str, replacements: List[Replacement]) -> str:
     """
-    Applies a set of (non-overlapping) replacements to a text and returns 
+    Applies a set of (non-overlapping) replacements to a text and returns
     it.
     """
     replacements = sorted(replacements)
