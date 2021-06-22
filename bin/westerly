@@ -90,6 +90,10 @@ def is_comment(token: Token) -> bool:
     return token[1] in (Comment.Single, Comment.Multiline)
 
 
+def is_type(token: Token) -> bool:
+    return token[1] == Keyword.Type or token[2] == "auto"
+
+
 def skip_over_preproc_definition(tokens: List[Token], index: int) -> int:
     while index < len(tokens):
         if tokens[index][2] == "\n":
@@ -166,7 +170,7 @@ def find_east_const_pos(tokens: List[Token], index: int) -> int:
         if token[2] in ("static", "constexpr", "volatile"):
             index += 1
             continue
-        if token[1] == Keyword.Type:
+        if is_type(token):
             return index + 1
         if token[1] == Name:
             if not name_is_type:
