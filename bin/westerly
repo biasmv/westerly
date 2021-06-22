@@ -75,7 +75,7 @@ def new_state_for_token(token: Token, state: int) -> int:
     )
     if spelling in expression_starting_tokens:
         return EXPRESSION_START
-    if spelling in ("public", "protected", "private", ":"):
+    if spelling in ("public", "protected", "private", ":", "virtual"):
         return EXPRESSION_START
     if spelling in ("constexpr", "volatile", "static") and state < SOMETHING_ELSE:
         return LEFT_SCV_QUALIFIERS
