@@ -44,12 +44,13 @@ def is_const(token: Token) -> bool:
     return token[2] == "const"
 
 
+LEFT_QUALIFIER_TOKENS = ("constexpr", "volatile", "static", "inline")
+
 # last token initiated a new expression
 EXPRESSION_START = 0
-# currently processing as sequence of static, constexpr, volatile
-# qualifiers to the left of a type. Const appearing at this position
-# are west consts.
-LEFT_SCV_QUALIFIERS = 1
+# currently processing as sequence of one of the LEFT_QUALIFIER_TOKENS
+# to the left of a type. Const appearing at this position are west consts.
+LEFT_QUALIFIERS = 1
 # currently processing something other than an expression start or
 # SCV qualifier sequence. Waiting for the next expression start.
 SOMETHING_ELSE = 2
@@ -75,8 +76,10 @@ def new_state_for_token(token: Token, state: int) -> int:
     )
     if spelling in expression_starting_tokens:
         return EXPRESSION_START
-    if spelling in ("constexpr", "volatile", "static") and state < SOMETHING_ELSE:
-        return LEFT_SCV_QUALIFIERS
+    if spelling in ("public", "protected", "private", ":", "virtual"):
+        return EXPRESSION_START
+    if spelling in LEFT_QUALIFIER_TOKENS and state < SOMETHING_ELSE:
+        return LEFT_QUALIFIERS
     return SOMETHING_ELSE
 
 
@@ -86,6 +89,10 @@ def is_space(token: Token) -> bool:
 
 def is_comment(token: Token) -> bool:
     return token[1] in (Comment.Single, Comment.Multiline)
+
+
+def is_type(token: Token) -> bool:
+    return token[1] == Keyword.Type or token[2] == "auto"
 
 
 def skip_over_preproc_definition(tokens: List[Token], index: int) -> int:
@@ -113,7 +120,7 @@ def get_west_const_indices(tokens: List[Token]) -> List[int]:
         token = tokens[index]
         if is_const(token) and state < SOMETHING_ELSE:
             west_const_indices.append(index)
-            state = LEFT_SCV_QUALIFIERS
+            state = LEFT_QUALIFIERS
             index += 1
             continue
         if is_space(token) or is_comment(token):
@@ -121,7 +128,7 @@ def get_west_const_indices(tokens: List[Token]) -> List[int]:
             continue
         if token[1] == Comment.Preproc and token[2] == "#":
             index = skip_over_preproc_definition(tokens, index)
-            state = LEFT_SCV_QUALIFIERS
+            state = LEFT_QUALIFIERS
             continue
         state = new_state_for_token(token, state)
         index += 1
@@ -161,10 +168,10 @@ def find_east_const_pos(tokens: List[Token], index: int) -> int:
         if is_space(token) or (name_is_type and is_comment(token)):
             index += 1
             continue
-        if token[2] in ("static", "constexpr", "volatile"):
+        if token[2] in LEFT_QUALIFIER_TOKENS:
             index += 1
             continue
-        if token[1] == Keyword.Type:
+        if is_type(token):
             return index + 1
         if token[1] == Name:
             if not name_is_type:

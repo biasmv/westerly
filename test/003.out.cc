@@ -10,3 +10,9 @@ int const static kFoo9 = 8;
 static int const kFoo10 = 9;
 static int const kFoo11 = 10;
 
+int inline const kFoo12 = 11;
+int const inline kFoo13 = 12;
+int const inline kFoo14 = 13;
+inline int const kFoo15 = 14;
+inline int const kFoo16 = 15;
+
